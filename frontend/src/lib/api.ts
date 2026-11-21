@@ -1,8 +1,11 @@
+
 /**
  * Single place that talks to the backend. Requests use relative URLs (Vite proxies /api in development, a reverse
  * proxy does in production), send the HttpOnly session cookie automatically, and add the CSRF token to every
  * state-changing request. All failures surface as ApiError with the backend's error code.
  */
+
+const API_BASE_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
 
 export interface ApiErrorBody {
   code: string;
@@ -41,11 +44,12 @@ export const setUnauthenticatedHandler = (handler: (() => void) | null): void =>
 type Query = Record<string, string | number | boolean | undefined | null>;
 
 export function withQuery(path: string, query?: Query): string {
-  if (!query) return `/api${path}`;
   const params = new URLSearchParams();
-  for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== null && v !== '') params.set(k, String(v));
+  if (query) {
+    for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== null && v !== '') params.set(k, String(v));
+  }
   const qs = params.toString();
-  return `/api${path}${qs ? `?${qs}` : ''}`;
+  return `${API_BASE_URL}/api${path}${qs ? `?${qs}` : ''}`;
 }
 
 async function toError(res: Response): Promise<ApiError> {
@@ -71,7 +75,7 @@ async function send(method: string, path: string, opts: { query?: Query; body?: 
   }
   let res: Response;
   try {
-    res = await fetch(withQuery(path, opts.query), { method, headers, body, credentials: 'same-origin' });
+    res = await fetch(withQuery(path, opts.query), { method, headers, body, credentials: 'include' });
   } catch {
     throw new ApiError(0, { code: 'NETWORK', message: 'Cannot reach the server. Check your connection and try again.' });
   }
