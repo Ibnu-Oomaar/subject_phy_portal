@@ -1,6 +1,6 @@
 {
   "info": {
-    "name": "Mathematics Data Entry Portal",
+    "name": "Physics Data Entry Portal",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "description": "Run top to bottom (Collection Runner) or request by request.\n1. \"Teacher login\" stores the CSRF token; Postman keeps the HttpOnly session cookie automatically.\n2. \"Classes and sections\" stores sectionId; \"Create academic year\" stores academicYearId (change {{yearLabel}} if the year exists); \"Add student\" stores enrollmentId.\n3. Every non-GET request sends X-CSRF-Token: {{csrfToken}}.\n4. The import preview needs you to choose a .xlsx/.csv file in the \"file\" field; skip the import requests in a runner.\n5. The last folder logs in as a student (Student ID only) and is read-only.\nThe teacher name and Student ID in the bodies match the seed data from the README; change them to yours."
   },
@@ -1161,7 +1161,7 @@
             "description": "One examination is created per section in sectionIds.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"academicYearId\": \"{{academicYearId}}\",\n  \"sectionIds\": [\n    \"{{sectionId}}\"\n  ],\n  \"term\": 1,\n  \"name\": \"Term 1 Mathematics Examination\",\n  \"maxMarks\": 50,\n  \"examDate\": \"2026-04-20\"\n}",
+              "raw": "{\n  \"academicYearId\": \"{{academicYearId}}\",\n  \"sectionIds\": [\n    \"{{sectionId}}\"\n  ],\n  \"term\": 1,\n  \"name\": \"Term 1 Physics Examination\",\n  \"maxMarks\": 50,\n  \"examDate\": \"2026-04-20\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1247,7 +1247,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Term 1 Mathematics Examination\",\n  \"maxMarks\": 50\n}",
+              "raw": "{\n  \"name\": \"Term 1 Physics Examination\",\n  \"maxMarks\": 50\n}",
               "options": {
                 "raw": {
                   "language": "json"

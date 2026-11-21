@@ -28,7 +28,7 @@ function Brand() {
   return (
     <div className="flex h-12 items-center gap-2 px-4">
       <div className="flex size-6 items-center justify-center rounded-md bg-primary text-sm leading-none font-bold text-primary-foreground">+</div>
-      <span className="text-[13px] font-semibold tracking-tight">Mathematics Portal</span>
+      <span className="text-[13px] font-semibold tracking-tight">Physics Portal</span>
     </div>
   );
 }

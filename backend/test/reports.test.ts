@@ -79,7 +79,7 @@ beforeAll(async () => {
   expect((await putA('B', E.brian!, { classActivities: 4, homeworkAssignments: 3 })).status).toBe(200); // partial
   expect((await putA('C', E.carl!, { classActivities: 8, homeworkAssignments: 5, learningMaterialsNotebook: 9, textbook: 5 })).status).toBe(200); // 27
 
-  expect((await teacher.post('/examinations', { academicYearId: year1, sectionIds: [S.B, S.C], term: 1, name: 'Term 1 Mathematics Examination', maxMarks: 50, examDate: '2026-04-20' })).status).toBe(201);
+  expect((await teacher.post('/examinations', { academicYearId: year1, sectionIds: [S.B, S.C], term: 1, name: 'Term 1 Physics Examination', maxMarks: 50, examDate: '2026-04-20' })).status).toBe(201);
   expect((await teacher.post('/examinations', { academicYearId: year1, sectionId: S.B, term: 1, name: 'Quiz', maxMarks: 37.5, examDate: '2026-03-01' })).status).toBe(201);
   const exams: Array<{ id: string; name: string; section_id: string }> = await t.ds.query(`SELECT id, name, section_id FROM examinations`);
   examB = exams.find((x) => x.name.startsWith('Term 1') && x.section_id === S.B)!.id;
@@ -126,7 +126,7 @@ describe('students export', () => {
     const r = await ex(teacher, 'students', { academicYearId: year1 });
     expect(r.status).toBe(200);
     expect(r.headers.get('content-type')).toContain('spreadsheetml');
-    expect(r.headers.get('content-disposition')).toMatch(/^attachment; filename="Mathematics_students_2026-2027_All-sections\.xlsx"$/);
+    expect(r.headers.get('content-disposition')).toMatch(/^attachment; filename="Physics_students_2026-2027_All-sections\.xlsx"$/);
     expect(r.headers.get('cache-control')).toBe('no-store');
     const rows = table(await book(r), 'Students');
     expect(rows.map((x) => x['Student ID']).sort()).toEqual(['T-1001', 'T-1002', 'T-1003', 'T-2001', 'T-3001']);
@@ -206,7 +206,7 @@ describe('examination export', () => {
     const rows = table(wb, 'Term 1 exams');
     // two examinations in 1B x 3 students each
     expect(rows).toHaveLength(6);
-    const main = rows.filter((r) => String(r.Examination).startsWith('Term 1 Mathematics'));
+    const main = rows.filter((r) => String(r.Examination).startsWith('Term 1 Physics'));
     expect(main.map((r) => r['Maximum'])).toEqual([50, 50, 50]);
     expect(byId(main, 'T-1001')).toMatchObject({ Marks: 45, 'Percentage (%)': 90, Status: 'Entered' });
     expect(byId(main, 'T-1003')).toMatchObject({ Marks: null, 'Percentage (%)': null, Status: 'Missing' });
@@ -247,7 +247,7 @@ describe('individual results', () => {
 
     const results = table(wb, 'Results');
     const t1 = results.filter((x) => x.Term === 'Term 1');
-    expect(t1.map((x) => x.Result).sort()).toEqual(['Quiz', 'Term 1 assessment', 'Term 1 Mathematics Examination'].sort());
+    expect(t1.map((x) => x.Result).sort()).toEqual(['Quiz', 'Term 1 assessment', 'Term 1 Physics Examination'].sort());
     expect(t1.find((x) => x.Result === 'Quiz')).toMatchObject({ Marks: 30, Maximum: 37.5, 'Percentage (%)': 80 });
     const t2 = results.filter((x) => x.Term === 'Term 2');
     expect(t2).toHaveLength(1);

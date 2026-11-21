@@ -6,6 +6,7 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   DATABASE_URL: z.string().min(1),
+  TEST_DATABASE_URL: z.string().min(1).optional(),
   DB_LOGGING: boolish.default(false),
   APP_ORIGIN: z
     .string()
@@ -31,8 +32,11 @@ function load() {
     throw new Error(`Invalid environment configuration:\n${lines}`);
   }
   const v = parsed.data;
+  const isTest = v.NODE_ENV === 'test';
+  const effectiveDatabaseUrl = isTest ? (v.TEST_DATABASE_URL ?? v.DATABASE_URL) : v.DATABASE_URL;
   return {
     ...v,
+    DATABASE_URL: effectiveDatabaseUrl,
     isProduction: v.NODE_ENV === 'production',
     isTest: v.NODE_ENV === 'test',
     cookieSecure: v.COOKIE_SECURE ?? v.NODE_ENV === 'production',

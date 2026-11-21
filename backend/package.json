@@ -1,16 +1,16 @@
 {
-  "name": "math-portal-backend",
+  "name": "physics-portal-backend",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "bun run src/main.ts",
-    "dev": "bun --watch run src/main.ts",
+    "start": "bun --env-file=../.env run src/main.ts",
+    "dev": "bun --env-file=../.env --watch run src/main.ts",
     "build": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun test",
-    "migration:run": "bun run src/database/migrate.ts",
-    "seed:teacher": "bun run src/database/seed-teacher.ts"
+    "test": "bun --env-file=../.env test",
+    "migration:run": "bun --env-file=../.env run src/database/migrate.ts",
+    "seed:teacher": "bun --env-file=../.env run src/database/seed-teacher.ts"
   },
   "dependencies": {
     "@nestjs/common": "^12.5.1",

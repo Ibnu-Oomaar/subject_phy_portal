@@ -131,7 +131,7 @@ export default function Login() {
         <div className="mb-6 flex flex-col items-center gap-3 text-center">
           <div className="flex size-10 items-center justify-center rounded-xl bg-primary text-xl leading-none font-bold text-primary-foreground shadow-sm">+</div>
           <div>
-            <h1 className="text-lg font-semibold tracking-tight">Mathematics Data Entry Portal</h1>
+            <h1 className="text-lg font-semibold tracking-tight">Physics Data Entry Portal</h1>
             <p className="mt-1 text-[13px] text-muted-foreground">Class 1B – 1H marks, results and reports</p>
           </div>
         </div>

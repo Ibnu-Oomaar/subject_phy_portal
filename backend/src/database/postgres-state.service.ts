@@ -178,7 +178,7 @@ export class PostgresStateService implements OnModuleInit, OnModuleDestroy {
     const token = randomUUID();
     const rows = await this.dataSource.query(
       `INSERT INTO app_state (state_key, value, expires_at)
-       VALUES ($1, jsonb_build_object('token', $2), now() + ($3::double precision * interval '1 second'))
+       VALUES ($1, jsonb_build_object('token', $2::text), now() + ($3::double precision * interval '1 second'))
        ON CONFLICT (state_key) DO UPDATE
          SET value = EXCLUDED.value, expires_at = EXCLUDED.expires_at
          WHERE app_state.expires_at IS NULL OR app_state.expires_at <= now()

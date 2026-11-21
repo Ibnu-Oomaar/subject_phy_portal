@@ -1,5 +1,5 @@
 /**
- * Creates the Mathematics teacher account (there is intentionally no public registration) and assigns every
+ * Creates the Physics teacher account (there is intentionally no public registration) and assigns every
  * section. Safe to run repeatedly: an existing teacher with the same name is left unchanged.
  *
  *   bun run seed:teacher -- --name "Full Name" [--passcode "at-least-8-chars"] [--sections 1B,1C]

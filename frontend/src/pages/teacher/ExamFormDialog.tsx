@@ -82,7 +82,7 @@ export function ExamFormDialog({ open, onOpenChange, yearId, sections, defaultSe
 
           <div>
             <Label htmlFor="exam-name" className="mb-1.5">Name</Label>
-            <Input id="exam-name" autoFocus placeholder="For example: Term 1 Mathematics Examination" aria-invalid={!!errors.name} {...form.register('name')} />
+            <Input id="exam-name" autoFocus placeholder="For example: Term 1 Physics Examination" aria-invalid={!!errors.name} {...form.register('name')} />
             <FieldError>{errors.name?.message}</FieldError>
           </div>
 

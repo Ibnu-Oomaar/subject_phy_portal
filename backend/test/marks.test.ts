@@ -215,19 +215,19 @@ describe('examinations: configurable maximums', () => {
   const examSheet = async (id: string, q = '') => (await teacher.get(`/examinations/${id}/sheet${q}`)).body;
 
   test('the teacher sets the maximum for each exam: 50, 60 and 100 are only examples (37.5 works too)', async () => {
-    const t1 = await teacher.post('/examinations', { academicYearId: year1, sectionIds: [S.B, S.C], term: 1, name: 'Term 1 Mathematics Examination', maxMarks: 50, examDate: '2026-04-20' });
+    const t1 = await teacher.post('/examinations', { academicYearId: year1, sectionIds: [S.B, S.C], term: 1, name: 'Term 1 Physics Examination', maxMarks: 50, examDate: '2026-04-20' });
     expect(t1.status).toBe(201);
     expect(t1.body.map((x: any) => [x.sectionLabel, x.maxMarks])).toEqual([['1B', 50], ['1C', 50]]);
     ids.t1 = t1.body.find((x: any) => x.sectionLabel === '1B').id;
     ids.t1c = t1.body.find((x: any) => x.sectionLabel === '1C').id;
-    ids.t2 = (await teacher.post('/examinations', { academicYearId: year1, sectionId: S.B, term: 2, name: 'Term 2 Mathematics Examination', maxMarks: 60 })).body[0].id;
-    ids.t3 = (await teacher.post('/examinations', { academicYearId: year1, sectionId: S.B, term: 3, name: 'Final Term 3 Mathematics Examination', maxMarks: 100 })).body[0].id;
+    ids.t2 = (await teacher.post('/examinations', { academicYearId: year1, sectionId: S.B, term: 2, name: 'Term 2 Physics Examination', maxMarks: 60 })).body[0].id;
+    ids.t3 = (await teacher.post('/examinations', { academicYearId: year1, sectionId: S.B, term: 3, name: 'Final Term 3 Physics Examination', maxMarks: 100 })).body[0].id;
     ids.odd = (await teacher.post('/examinations', { academicYearId: year1, sectionId: S.B, term: 1, name: 'Quiz', maxMarks: 37.5 })).body[0].id;
     const list = (await teacher.get(`/examinations?academicYearId=${year1}&sectionId=${S.B}`)).body;
     expect(list.map((x: any) => x.maxMarks).sort((a: number, b: number) => a - b)).toEqual([37.5, 50, 60, 100]);
   });
   test('validation: duplicates, bad maximum, bad term, bad date, no section', async () => {
-    const dup = await teacher.post('/examinations', { academicYearId: year1, sectionId: S.B, term: 1, name: 'term 1 mathematics examination', maxMarks: 50 });
+    const dup = await teacher.post('/examinations', { academicYearId: year1, sectionId: S.B, term: 1, name: 'term 1 physics examination', maxMarks: 50 });
     expect(dup.status).toBe(409);
     expect((await teacher.post('/examinations', { academicYearId: year1, sectionId: S.B, term: 1, name: 'Z', maxMarks: 0 })).status).toBe(400);
     expect((await teacher.post('/examinations', { academicYearId: year1, sectionId: S.B, term: 1, name: 'Z', maxMarks: 1001 })).status).toBe(400);

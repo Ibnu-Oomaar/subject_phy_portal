@@ -11,7 +11,7 @@ export function UserMenu() {
   const navigate = useNavigate();
   if (!session) return null;
   const name = session.role === 'teacher' ? session.user.name : session.user.fullName;
-  const sub = session.role === 'teacher' ? 'Mathematics teacher' : `Student ${session.user.studentId}`;
+  const sub = session.role === 'teacher' ? 'Physics teacher' : `Student ${session.user.studentId}`;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

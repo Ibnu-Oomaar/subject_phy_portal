@@ -38,7 +38,7 @@ export default function StudentDashboard() {
       ) : years.isError ? (
         <ErrorState error={years.error} onRetry={() => void years.refetch()} />
       ) : list.length === 0 ? (
-        <EmptyState icon={GraduationCap} title="No results yet" description="You are not enrolled in an academic year yet. Please ask your Mathematics teacher." />
+        <EmptyState icon={GraduationCap} title="No results yet" description="You are not enrolled in an academic year yet. Please ask your Physics teacher." />
       ) : profile.isPending ? (
         <CardSkeleton className="h-64" />
       ) : profile.isError ? (

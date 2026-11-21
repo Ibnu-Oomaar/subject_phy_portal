@@ -9,6 +9,7 @@ import { defineConfig } from 'vite';
 const API = process.env.VITE_API_TARGET ?? 'http://localhost:3000';
 
 export default defineConfig({
+  envDir: '..',
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } },
   server: {

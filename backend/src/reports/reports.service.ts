@@ -155,7 +155,7 @@ export class ReportsService {
   }
 
   private async finish(wb: ExcelJS.Workbook, ...nameParts: string[]): Promise<ExportFile> {
-    return { buffer: await this.excel.toBuffer(wb), fileName: exportFilename('Mathematics', ...nameParts) };
+    return { buffer: await this.excel.toBuffer(wb), fileName: exportFilename('Physics', ...nameParts) };
   }
 
   // ------------------------------------------------------------------------------------------------------

@@ -40,7 +40,7 @@ const sheetName = (name: string): string => name.replace(/[\\/*?:[\]]/g, '-').sl
 export class ExcelService {
   createWorkbook(): ExcelJS.Workbook {
     const wb = new ExcelJS.Workbook();
-    wb.creator = 'Mathematics Data Entry Portal';
+    wb.creator = 'Physics Data Entry Portal';
     wb.created = new Date();
     return wb;
   }

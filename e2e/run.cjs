@@ -43,7 +43,7 @@ const badResponses = [];
   await step('teacher logs in by registered name only', async () => {
     await page.fill('#name', TEACHER); await page.getByRole('button', { name: 'Sign in as teacher' }).click();
     await page.waitForURL(BASE + '/', { timeout: 8000 });
-    await page.getByText('Mathematics Portal').first().waitFor();
+    await page.getByText('Physics Portal').first().waitFor();
   });
   await step('dashboard with no academic year shows an empty state, not fake data', async () => {
     await page.waitForTimeout(800); await noErrorState('dashboard');
@@ -165,10 +165,10 @@ const badResponses = [];
   await step('examinations: create with teacher-chosen maximum (50), enter marks, max enforced', async () => {
     await page.goto(BASE + '/examinations');
     await page.getByRole('button', { name: /New examination/ }).first().click();
-    await page.fill('#exam-name', 'Term 1 Mathematics Examination'); await page.fill('#exam-max', '50');
+    await page.fill('#exam-name', 'Term 1 Physics Examination'); await page.fill('#exam-max', '50');
     await page.getByRole('button', { name: 'Create examination' }).click();
     await page.waitForURL(/\/examinations\/[0-9a-f-]{36}/, { timeout: 8000 }); // creating an exam opens it
-    await page.getByRole('heading', { name: 'Term 1 Mathematics Examination' }).waitFor();
+    await page.getByRole('heading', { name: 'Term 1 Physics Examination' }).waitFor();
     examUrl = page.url().replace(BASE, '');
     const m = page.getByLabel(/Amina Ali: marks out of 50/); await m.waitFor();
     await m.fill('51'); if ((await m.getAttribute('aria-invalid')) !== 'true') throw new Error('51/50 not flagged');

@@ -50,12 +50,12 @@ describe('fixture', () => {
     await enroll('dan', 'B', 'T-1004', 'Dan Njoroge');
     await enroll('carl', 'C', 'T-2001', 'Carl Kamau');
 
-    const t1 = (await teacher.post('/examinations', { academicYearId: year, sectionIds: [S.B, S.C], term: 1, name: 'Term 1 Mathematics Examination', maxMarks: 50 })).body;
+    const t1 = (await teacher.post('/examinations', { academicYearId: year, sectionIds: [S.B, S.C], term: 1, name: 'Term 1 Physics Examination', maxMarks: 50 })).body;
     X.t1B = t1.find((x: any) => x.sectionLabel === '1B').id;
     X.t1C = t1.find((x: any) => x.sectionLabel === '1C').id;
     // section C sits the same exam out of 100: percentages must use each exam's own maximum
     expect((await teacher.patch(`/examinations/${X.t1C}`, { maxMarks: 100 })).status).toBe(200);
-    X.t2B = (await teacher.post('/examinations', { academicYearId: year, sectionId: S.B, term: 2, name: 'Term 2 Mathematics Examination', maxMarks: 60 })).body[0].id;
+    X.t2B = (await teacher.post('/examinations', { academicYearId: year, sectionId: S.B, term: 2, name: 'Term 2 Physics Examination', maxMarks: 60 })).body[0].id;
 
     // amina: T1 assessment 30/30=100, T1 exam 45/50=90 (T1 index 95); T2 exam 54/60=90 (T2 index 90)
     expect((await saveAssessment('amina', 1, a(9, 6, 10, 5))).status).toBe(200);
@@ -82,7 +82,7 @@ describe('individual student profile (teacher view)', () => {
     const t1 = p.terms[0];
     expect(t1.components.map((c: any) => [c.kind, c.label, c.marks, c.max, c.percent, c.state])).toEqual([
       ['assessment', 'Term 1 assessment', 30, 30, 100, 'entered'],
-      ['exam', 'Term 1 Mathematics Examination', 45, 50, 90, 'entered'],
+      ['exam', 'Term 1 Physics Examination', 45, 50, 90, 'entered'],
     ]);
     expect(p.terms[1].components[0]).toMatchObject({ kind: 'assessment', state: 'missing', marks: null, percent: null }); // missing, not zero
     expect(p.terms[1].components[1]).toMatchObject({ marks: 54, max: 60, percent: 90 });
@@ -207,7 +207,7 @@ describe('rankings', () => {
   });
   test('exam ranking in one section', async () => {
     const r = (await rank(`sectionId=${S.B}&kind=exam&examId=${X.t1B}`)).body;
-    expect(r.title).toBe('Term 1 Mathematics Examination');
+    expect(r.title).toBe('Term 1 Physics Examination');
     expect(r.items.map((x: any) => [x.rank, x.fullName, x.marks, x.max, x.percent])).toEqual([
       [1, 'Amina Ali', 45, 50, 90],
       [2, 'Brian Otieno', 20, 50, 40],

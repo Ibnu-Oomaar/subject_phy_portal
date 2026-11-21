@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "math-portal-backend",
+      "name": "physics-portal-backend",
       "dependencies": {
         "@nestjs/common": "^12.5.1",
         "@nestjs/core": "^12.5.1",

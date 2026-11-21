@@ -13,7 +13,7 @@ async function bootstrap() {
   configureApp(app);
   app.enableShutdownHooks();
   await app.listen(env.PORT);
-  new Logger('Bootstrap').log(`Mathematics portal API listening on :${env.PORT} (${env.NODE_ENV})`);
+  new Logger('Bootstrap').log(`Physics portal API listening on :${env.PORT} (${env.NODE_ENV})`);
 }
 
 bootstrap().catch((err) => {
