@@ -6,8 +6,8 @@
   "scripts": {
     "start": "bun --env-file=../.env run src/main.ts",
     "dev": "bun --env-file=../.env --watch run src/main.ts",
-    "build": "tsc --noEmit -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "bun run tsc --noEmit -p tsconfig.build.json",
+    "typecheck": "bun run tsc --noEmit -p tsconfig.json",
     "test": "bun --env-file=../.env test",
     "migration:run": "bun --env-file=../.env run src/database/migrate.ts",
     "seed:teacher": "bun --env-file=../.env run src/database/seed-teacher.ts"
