@@ -1,3 +1,4 @@
+
 import type { INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
@@ -13,6 +14,14 @@ export function configureApp(app: INestApplication): void {
   // Number of reverse proxies in front of the API; needed so req.ip (rate limiting) is the real client address.
   express.set('trust proxy', env.TRUST_PROXY);
   express.setGlobalPrefix('api');
+
+  app.enableCors({
+    origin: env.appOrigins,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+  });
+
   express.use(securityHeaders);
   express.use(cookieParser());
   express.use(json({ limit: '1mb' }));
