@@ -1,9 +1,15 @@
+
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
 import { DataSource, QueryFailedError, type EntityManager } from 'typeorm';
 import { AcademicYear } from '../academic-years/academic-year.entity';
-import { ASSESSMENT_FIELDS, ASSESSMENT_MAX_TOTAL, type AssessmentField } from '../assessments/assessment-categories';
+import {
+  getAssessmentCategories,
+  getAssessmentFields,
+  getAssessmentMaxTotal,
+  type AssessmentField,
+} from '../assessments/assessment-categories';
 import { AssessmentRecord } from '../assessments/assessment-record.entity';
 import { AppError, Errors } from '../common/errors';
 import type { AuthContext } from '../common/types';
@@ -47,11 +53,22 @@ const LOCKED_MESSAGE =
   'These results are finalized or belong to a closed academic year. Enter a correction reason to change them.';
 const CONCURRENT_MESSAGE = 'Some results were changed by someone else after you opened them. Reload to see the latest values.';
 
+const ALL_ASSESSMENT_FIELDS: readonly AssessmentField[] = [
+  'monthlyExamTest1',
+  'quantityOfHeatAssignments',
+  'electrostaticsAssignments',
+  'physicsNotebookAssessments',
+  'physicsTextbookAssessments',
+  'capacitorsNotesAssessments',
+  'propertiesOfMatterAssignment',
+  'heatAndTemperatureAssignment',
+];
+
 /**
  * Single place where marks are written. Every write:
  *  - checks the teacher is assigned to the section (server-side authorization),
  *  - verifies each student really belongs to that section and academic year,
- *  - validates marks against the fixed assessment maxima / the examination's configured maximum,
+ *  - validates marks against the class assessment maxima / the examination's configured maximum,
  *  - runs in ONE transaction with row locks, so concurrent saves cannot interleave,
  *  - uses optimistic versions, so a stale screen can never silently overwrite newer data,
  *  - refuses to touch finalized results or closed years unless an explicit correction reason is given,
@@ -70,7 +87,7 @@ export class MarksService {
   ) {}
 
   // ------------------------------------------------------------------------------------------------------------
-  // Assessments (fixed 4 categories, 30 marks)
+  // Assessments (class-specific categories, total 30 marks)
   // ------------------------------------------------------------------------------------------------------------
   async saveAssessments(auth: AuthContext, dto: AssessmentSaveDto): Promise<SaveResult> {
     await this.scope.assertSection(auth, dto.sectionId);
@@ -78,6 +95,42 @@ export class MarksService {
       this.dataSource.transaction(async (m) => {
         const year = await this.getYear(m, dto.academicYearId);
         const section = await m.findOneByOrFail(Section, { id: dto.sectionId });
+
+        const [sectionClass] = (await m.query(
+          `SELECT c.grade_level
+             FROM sections s
+             JOIN classes c ON c.id = s.class_id
+            WHERE s.id = $1`,
+          [dto.sectionId],
+        )) as Array<{ grade_level: number }>;
+
+        const classId = Number(sectionClass?.grade_level);
+        const categories = getAssessmentCategories(classId);
+        const fields = getAssessmentFields(classId);
+        const maxTotal = getAssessmentMaxTotal(classId);
+
+        const invalidFields = dto.entries.flatMap((entry, i) =>
+          ALL_ASSESSMENT_FIELDS.flatMap((field) =>
+            !fields.includes(field) && entry[field] !== undefined && entry[field] !== null
+              ? [{ path: `entries.${i}.${field}`, message: 'This category is not available for this class' }]
+              : [],
+          ),
+        );
+
+        const tooHigh = dto.entries.flatMap((entry, i) =>
+          fields.flatMap((field) => {
+            const value = entry[field];
+            const category = categories.find((item) => item.field === field);
+            return value !== undefined && value !== null && category && value > category.maxMarks
+              ? [{ path: `entries.${i}.${field}`, message: `The maximum for this category is ${category.maxMarks}` }]
+              : [];
+          }),
+        );
+
+        if (invalidFields.length || tooHigh.length) {
+          throw Errors.validation([...invalidFields, ...tooHigh]);
+        }
+
         const ids = dto.entries.map((e) => e.enrollmentId);
         const enrollments = await this.loadEnrollments(m, ids, dto.sectionId, year.id);
 
@@ -107,26 +160,32 @@ export class MarksService {
             conflicts.push({ enrollmentId: entry.enrollmentId, expectedVersion: entry.version, currentVersion });
             continue;
           }
-          const before = current ? this.scoresOf(current) : emptyScores();
+
+          const before = current ? this.scoresOf(current) : emptyScores(classId);
           const next: AssessmentScores = { ...before };
           const changed: AssessmentField[] = [];
-          for (const field of ASSESSMENT_FIELDS) {
+
+          for (const field of fields) {
             const value = entry[field];
             if (value !== undefined && value !== before[field]) {
               next[field] = value;
               changed.push(field);
             }
           }
+
           if (!changed.length) continue;
+
           const isLocked = year.status === 'closed' || current?.status === 'finalized';
           if (isLocked && !dto.correctionReason) {
             locked.push(entry.enrollmentId);
             continue;
           }
-          if (current?.status === 'finalized' && ASSESSMENT_FIELDS.some((f) => next[f] === null)) {
+
+          if (current?.status === 'finalized' && fields.some((field) => next[field] === null)) {
             finalizedIncomplete.push(entry.enrollmentId);
             continue;
           }
+
           plan.push({ enrollmentId: entry.enrollmentId, current, before, next, changed, isLocked });
         }
 
@@ -165,10 +224,12 @@ export class MarksService {
               }),
             );
           }
+
           const action = p.isLocked ? 'assessment.correction' : p.current ? 'assessment.update' : 'assessment.create';
           if (p.isLocked) corrected++;
           else if (p.current) updated++;
           else created++;
+
           audits.push({
             actor: auth,
             action,
@@ -177,24 +238,29 @@ export class MarksService {
             batchId,
             academicYearId: year.id,
             sectionId: dto.sectionId,
-            before: this.pick(p.before, p.changed, assessmentTotal(p.before)),
-            after: this.pick(p.next, p.changed, assessmentTotal(p.next)),
+            before: this.pick(p.before, p.changed, assessmentTotal(p.before, classId), classId),
+            after: this.pick(p.next, p.changed, assessmentTotal(p.next, classId), classId),
             context: {
               studentId: info.student_id,
               fullName: info.full_name,
               sectionLabel: section.label,
+              classId,
+              assessmentMaxTotal: maxTotal,
               term: dto.term,
               academicYear: year.label,
             },
             reason: p.isLocked ? dto.correctionReason : null,
           });
+
           records.push({ enrollmentId: p.enrollmentId, id: row.id, version: row.version, status: row.status });
         }
+
         await this.audit.log(m, audits);
 
         return { created, updated, corrected, cleared: 0, unchanged: dto.entries.length - plan.length, records, yearId: year.id };
       }),
     );
+
     await this.afterWrite(result.yearId, dto.sectionId, 'assessment', dto.term);
     const { yearId: _ignored, ...publicResult } = result;
     return publicResult;
@@ -206,6 +272,21 @@ export class MarksService {
     const result = await this.dataSource.transaction(async (m) => {
       const year = await this.getYear(m, dto.academicYearId);
       const section = await m.findOneByOrFail(Section, { id: dto.sectionId });
+
+      const [sectionClass] = (await m.query(
+        `SELECT c.grade_level
+           FROM sections s
+           JOIN classes c ON c.id = s.class_id
+          WHERE s.id = $1`,
+        [dto.sectionId],
+      )) as Array<{ grade_level: number }>;
+
+      const classId = Number(sectionClass?.grade_level);
+      const fields = getAssessmentFields(classId);
+      const columns = fields.map((field) => field.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`));
+      const completeCondition = columns.map((column) => `a."${column}" IS NOT NULL`).join(' AND ');
+      const enteredCondition = columns.map((column) => `a."${column}" IS NOT NULL`).join(' OR ');
+
       const done: Array<{ id: string; enrollment_id: string; student_id: string; full_name: string }> = await m.query(
         `WITH upd AS (
            UPDATE assessments a
@@ -213,13 +294,13 @@ export class MarksService {
              FROM enrollments e
             WHERE e.id = a.enrollment_id AND e.academic_year_id = $1 AND e.section_id = $2 AND a.term = $3
               AND a.status = 'entered'
-              AND a.class_activities IS NOT NULL AND a.homework_assignments IS NOT NULL
-              AND a.learning_materials_notebook IS NOT NULL AND a.textbook IS NOT NULL
+              AND ${completeCondition}
           RETURNING a.id, a.enrollment_id)
          SELECT upd.id, upd.enrollment_id, s.student_id, s.full_name
            FROM upd JOIN enrollments e ON e.id = upd.enrollment_id JOIN students s ON s.id = e.student_id`,
         [dto.academicYearId, dto.sectionId, dto.term, auth.userId],
       );
+
       const batchId = randomUUID();
       await this.audit.log(
         m,
@@ -233,22 +314,24 @@ export class MarksService {
           sectionId: dto.sectionId,
           before: { status: 'entered' },
           after: { status: 'finalized' },
-          context: { studentId: r.student_id, fullName: r.full_name, sectionLabel: section.label, term: dto.term, academicYear: year.label },
+          context: { studentId: r.student_id, fullName: r.full_name, sectionLabel: section.label, classId, term: dto.term, academicYear: year.label },
         })),
       );
+
       const [stats] = (await m.query(
         `SELECT (SELECT count(*) FROM enrollments WHERE academic_year_id = $1 AND section_id = $2) AS enrolled,
-                -- a row whose categories were all cleared is "missing", not an incomplete record
-                count(a.id) FILTER (WHERE a.class_activities IS NOT NULL OR a.homework_assignments IS NOT NULL
-                                       OR a.learning_materials_notebook IS NOT NULL OR a.textbook IS NOT NULL) AS records,
+                -- a row whose applicable categories were all cleared is "missing", not an incomplete record
+                count(a.id) FILTER (WHERE ${enteredCondition}) AS records,
                 count(a.id) FILTER (WHERE a.status = 'finalized') AS finalized
            FROM enrollments e LEFT JOIN assessments a ON a.enrollment_id = e.id AND a.term = $3
           WHERE e.academic_year_id = $1 AND e.section_id = $2`,
         [dto.academicYearId, dto.sectionId, dto.term],
       )) as Array<{ enrolled: string; records: string; finalized: string }>;
+
       const enrolled = Number(stats!.enrolled);
       const records = Number(stats!.records);
       const finalized = Number(stats!.finalized);
+
       return {
         yearId: year.id,
         out: {
@@ -259,6 +342,7 @@ export class MarksService {
         } satisfies FinalizeResult,
       };
     });
+
     await this.afterWrite(result.yearId, dto.sectionId, 'assessment', dto.term);
     return result.out;
   }
@@ -356,6 +440,7 @@ export class MarksService {
             records.push({ enrollmentId: p.enrollmentId, id: null, version: 0, status: 'missing' });
             continue;
           }
+
           const marks = p.marks as number;
           const previousMarks = p.current ? p.current.marks : null; // read before the entity is updated below
           let row: ExamMark;
@@ -369,10 +454,12 @@ export class MarksService {
               m.create(ExamMark, { examinationId: examId, enrollmentId: p.enrollmentId, marks, status: 'entered', version: 1, updatedById: auth.userId }),
             );
           }
+
           const action = p.isLocked ? 'exam_mark.correction' : p.current ? 'exam_mark.update' : 'exam_mark.create';
           if (p.isLocked) corrected++;
           else if (p.current) updated++;
           else created++;
+
           audits.push({
             ...base,
             action,
@@ -383,10 +470,12 @@ export class MarksService {
           });
           records.push({ enrollmentId: p.enrollmentId, id: row.id, version: row.version, status: row.status });
         }
+
         await this.audit.log(m, audits);
         return { created, updated, corrected, cleared, unchanged: dto.entries.length - plan.length, records, yearId: year.id, sectionId: exam.sectionId, term: exam.term };
       }),
     );
+
     await this.afterWrite(result.yearId, result.sectionId, 'exam', result.term, examId);
     const { yearId: _y, sectionId: _s, term: _t, ...publicResult } = result;
     return publicResult;
@@ -408,6 +497,7 @@ export class MarksService {
            FROM upd JOIN enrollments e ON e.id = upd.enrollment_id JOIN students s ON s.id = e.student_id`,
         [examId, auth.userId],
       );
+
       const batchId = randomUUID();
       await this.audit.log(
         m,
@@ -424,15 +514,18 @@ export class MarksService {
           context: { studentId: r.student_id, fullName: r.full_name, sectionLabel: section.label, term: exam.term, examName: exam.name, academicYear: year.label },
         })),
       );
+
       const [stats] = (await m.query(
         `SELECT (SELECT count(*) FROM enrollments WHERE academic_year_id = $2 AND section_id = $3) AS enrolled,
                 count(*) AS records, count(*) FILTER (WHERE status = 'finalized') AS finalized
            FROM exam_marks WHERE examination_id = $1`,
         [examId, exam.academicYearId, exam.sectionId],
       )) as Array<{ enrolled: string; records: string; finalized: string }>;
+
       const enrolled = Number(stats!.enrolled);
       const records = Number(stats!.records);
       const finalized = Number(stats!.finalized);
+
       return {
         yearId: year.id,
         sectionId: exam.sectionId,
@@ -440,6 +533,7 @@ export class MarksService {
         out: { finalized: done.length, alreadyFinalized: finalized - done.length, incomplete: records - finalized, missing: enrolled - records } satisfies FinalizeResult,
       };
     });
+
     await this.afterWrite(result.yearId, result.sectionId, 'exam', result.term, examId);
     return result.out;
   }
@@ -475,15 +569,29 @@ export class MarksService {
 
   private scoresOf(a: AssessmentRecord): AssessmentScores {
     return {
-      classActivities: a.classActivities,
-      homeworkAssignments: a.homeworkAssignments,
-      learningMaterialsNotebook: a.learningMaterialsNotebook,
-      textbook: a.textbook,
+      monthlyExamTest1: a.monthlyExamTest1,
+      quantityOfHeatAssignments: a.quantityOfHeatAssignments,
+      electrostaticsAssignments: a.electrostaticsAssignments,
+      physicsNotebookAssessments: a.physicsNotebookAssessments,
+      physicsTextbookAssessments: a.physicsTextbookAssessments,
+      capacitorsNotesAssessments: a.capacitorsNotesAssessments,
+      propertiesOfMatterAssignment: a.propertiesOfMatterAssignment,
+      heatAndTemperatureAssignment: a.heatAndTemperatureAssignment,
     };
   }
 
-  private pick(scores: AssessmentScores, fields: AssessmentField[], total: number | null): Record<string, unknown> {
-    return { ...Object.fromEntries(fields.map((f) => [f, scores[f]])), total, max: ASSESSMENT_MAX_TOTAL, state: assessmentState(scores, false) };
+  private pick(
+    scores: AssessmentScores,
+    fields: readonly AssessmentField[],
+    total: number | null,
+    classId: number,
+  ): Record<string, unknown> {
+    return {
+      ...Object.fromEntries(fields.map((field) => [field, scores[field]])),
+      total,
+      max: getAssessmentMaxTotal(classId),
+      state: assessmentState(scores, false, classId),
+    };
   }
 
   /** A unique violation here means two saves raced to create the same record. */

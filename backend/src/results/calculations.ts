@@ -1,4 +1,5 @@
-import { ASSESSMENT_FIELDS, ASSESSMENT_MAX_TOTAL, type AssessmentField } from '../assessments/assessment-categories';
+
+import { ASSESSMENT_CATEGORIES_BY_CLASS, getAssessmentFields, getAssessmentMaxTotal, type AssessmentField } from '../assessments/assessment-categories';
 import { fromHundredths, round2, toHundredths } from '../common/decimal';
 import type { ResultState } from '../common/types';
 import { RESULTS_CONFIG, type PerformanceThresholds } from './results.config';
@@ -10,20 +11,30 @@ import { RESULTS_CONFIG, type PerformanceThresholds } from './results.config';
 
 export type AssessmentScores = Record<AssessmentField, number | null>;
 
-export const emptyScores = (): AssessmentScores =>
-  Object.fromEntries(ASSESSMENT_FIELDS.map((f) => [f, null])) as AssessmentScores;
+const ALL_ASSESSMENT_FIELDS = [
+  ...new Set(
+    Object.values(ASSESSMENT_CATEGORIES_BY_CLASS).flatMap((categories) =>
+      categories.map((category) => category.field),
+    ),
+  ),
+] as AssessmentField[];
+
+export const emptyScores = (_classId: number): AssessmentScores =>
+  Object.fromEntries(ALL_ASSESSMENT_FIELDS.map((f) => [f, null])) as AssessmentScores;
 
 /** Sum of the categories that have been entered, or null when none has (never 0 for "nothing entered"). */
-export function assessmentTotal(scores: AssessmentScores): number | null {
-  const entered = ASSESSMENT_FIELDS.map((f) => scores[f]).filter((v): v is number => v !== null);
+export function assessmentTotal(scores: AssessmentScores, classId: number): number | null {
+  const fields = getAssessmentFields(classId);
+  const entered = fields.map((f) => scores[f]).filter((v): v is number => v !== null);
   if (!entered.length) return null;
   return fromHundredths(entered.reduce((sum, v) => sum + toHundredths(v), 0));
 }
 
-export function assessmentState(scores: AssessmentScores, finalized: boolean): ResultState {
-  const filled = ASSESSMENT_FIELDS.filter((f) => scores[f] !== null).length;
+export function assessmentState(scores: AssessmentScores, finalized: boolean, classId: number): ResultState {
+  const fields = getAssessmentFields(classId);
+  const filled = fields.filter((f) => scores[f] !== null).length;
   if (filled === 0) return 'missing';
-  if (filled < ASSESSMENT_FIELDS.length) return 'partial';
+  if (filled < fields.length) return 'partial';
   return finalized ? 'finalized' : 'entered';
 }
 
@@ -34,7 +45,8 @@ export function percentOf(marks: number, max: number): number {
   return round2((toHundredths(marks) * 100) / toHundredths(max));
 }
 
-export const assessmentPercent = (total: number): number => percentOf(total, ASSESSMENT_MAX_TOTAL);
+export const assessmentPercent = (total: number, classId: number): number =>
+  percentOf(total, getAssessmentMaxTotal(classId));
 
 export function mean(values: number[]): number | null {
   if (!values.length) return null;

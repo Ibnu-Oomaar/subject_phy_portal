@@ -1,9 +1,10 @@
+
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import type ExcelJS from 'exceljs';
 import { DataSource } from 'typeorm';
 import { AnalyticsService } from '../analytics/analytics.service';
-import { ASSESSMENT_CATEGORIES, ASSESSMENT_MAX_TOTAL } from '../assessments/assessment-categories';
+import { ASSESSMENT_CATEGORIES_BY_CLASS, getAssessmentCategories, getAssessmentMaxTotal } from '../assessments/assessment-categories';
 import { Errors } from '../common/errors';
 import type { AuthContext, ResultState, Term } from '../common/types';
 import { TERMS, TERM_LABELS } from '../common/types';
@@ -37,6 +38,7 @@ interface ScopedSection {
   id: string;
   label: string;
   className: string;
+  classId: number;
 }
 interface ResolvedScope {
   sections: ScopedSection[];
@@ -51,6 +53,14 @@ interface YearRow {
   label: string;
   status: 'planned' | 'active' | 'closed';
 }
+
+const ALL_ASSESSMENT_CATEGORIES = [
+  ...new Map(
+    Object.values(ASSESSMENT_CATEGORIES_BY_CLASS)
+      .flat()
+      .map((category) => [category.field, category]),
+  ).values(),
+];
 
 const STATE_LABEL: Record<ResultState, string> = { missing: 'Missing', partial: 'Partial', entered: 'Entered', finalized: 'Finalized' };
 const TREND_LABEL: Record<Trend, string> = { improving: 'Improving', declining: 'Declining', steady: 'Steady', insufficient: 'Not enough data' };
@@ -123,26 +133,39 @@ export class ReportsService {
     const load = (sql: string, params: unknown[]) =>
       this.dataSource
         .query(sql, params)
-        .then((rows: Array<{ id: string; label: string; class_name: string }>) => rows.map((r) => ({ id: r.id, label: r.label, className: r.class_name })));
+        .then((rows: Array<{ id: string; label: string; class_name: string; grade_level: number }>) =>
+          rows.map((r) => ({ id: r.id, label: r.label, className: r.class_name, classId: Number(r.grade_level) })),
+        );
 
     if (!q.sectionId) {
       if (opts.sectionRequired) throw Errors.badRequest('Choose a section for this export.', undefined, 'SECTION_REQUIRED');
-      sections = await load(`SELECT s.id, s.label, c.name AS class_name FROM sections s JOIN classes c ON c.id = s.class_id WHERE s.id = ANY($1::uuid[]) ORDER BY s.label`, [mine]);
+      sections = await load(
+        `SELECT s.id, s.label, c.name AS class_name, c.grade_level
+           FROM sections s JOIN classes c ON c.id = s.class_id
+          WHERE s.id = ANY($1::uuid[]) ORDER BY s.label`,
+        [mine],
+      );
       description = `All your sections (${sections.map((s) => s.label).join(', ') || 'none'})`;
       fileLabel = 'All-sections';
     } else {
       await this.scope.assertSection(auth, q.sectionId);
       if (q.scope === 'class') {
         sections = await load(
-          `SELECT s.id, s.label, c.name AS class_name FROM sections s JOIN classes c ON c.id = s.class_id
-            WHERE s.class_id = (SELECT class_id FROM sections WHERE id = $1) AND s.id = ANY($2::uuid[]) ORDER BY s.label`,
+          `SELECT s.id, s.label, c.name AS class_name, c.grade_level
+             FROM sections s JOIN classes c ON c.id = s.class_id
+            WHERE s.class_id = (SELECT class_id FROM sections WHERE id = $1) AND s.id = ANY($2::uuid[])
+            ORDER BY s.label`,
           [q.sectionId, mine],
         );
         const cls = sections[0]?.className ?? 'Class';
         description = `${cls} (${sections.map((s) => s.label).join(', ')})`;
         fileLabel = cls.replace(/\s+/g, '-');
       } else {
-        sections = await load(`SELECT s.id, s.label, c.name AS class_name FROM sections s JOIN classes c ON c.id = s.class_id WHERE s.id = $1`, [q.sectionId]);
+        sections = await load(
+          `SELECT s.id, s.label, c.name AS class_name, c.grade_level
+             FROM sections s JOIN classes c ON c.id = s.class_id WHERE s.id = $1`,
+          [q.sectionId],
+        );
         description = `Section ${sections[0]?.label ?? ''}`;
         fileLabel = sections[0]?.label ?? 'Section';
       }
@@ -201,18 +224,19 @@ export class ReportsService {
     for (const term of terms) {
       const rows = data.enrollments.map((e) => {
         const a = byKey.get(`${e.enrollmentId}:${term}`);
-        const state: ResultState = a ? assessmentState(a.scores, a.status === 'finalized') : 'missing';
+        const categories = getAssessmentCategories(e.classId);
+        const state: ResultState = a ? assessmentState(a.scores, a.status === 'finalized', e.classId) : 'missing';
         const counted = isCounted(state);
-        const total = a && counted ? assessmentTotal(a.scores) : null;
+        const total = a && counted ? assessmentTotal(a.scores, e.classId) : null;
         const row: Record<string, CellValue> = {
           studentId: e.studentId,
           fullName: e.fullName,
           section: e.sectionLabel,
           total,
-          percent: total === null ? null : assessmentPercent(total),
+          percent: total === null ? null : assessmentPercent(total, e.classId),
           state: STATE_LABEL[state],
         };
-        for (const c of ASSESSMENT_CATEGORIES) row[c.field] = a ? a.scores[c.field] : null; // blank, never 0
+        for (const c of categories) row[c.field] = a ? a.scores[c.field] : null;
         return row;
       });
       this.excel.addTable(wb, TERM_LABELS[term], {
@@ -222,8 +246,8 @@ export class ReportsService {
           text('Student ID', 'studentId', 16),
           text('Student Name', 'fullName', 32),
           text('Section', 'section', 10),
-          ...ASSESSMENT_CATEGORIES.map((c) => marks(`${c.name} (/${c.maxMarks})`, c.field, 18)),
-          marks(`Total (/${ASSESSMENT_MAX_TOTAL})`, 'total'),
+          ...ALL_ASSESSMENT_CATEGORIES.map((c) => marks(`${c.name} (/${c.maxMarks})`, c.field, 18)),
+          marks(`Total (/${getAssessmentMaxTotal(1)})`, 'total'),
           percent('Percentage (%)', 'percent'),
           text('Status', 'state', 12),
         ],
@@ -296,6 +320,14 @@ export class ReportsService {
   private async studentResult(auth: AuthContext, q: ExportQuery): Promise<ExportFile> {
     if (!q.enrollmentId) throw Errors.badRequest('Choose a student for this export.', undefined, 'STUDENT_REQUIRED');
     const p = await this.results.teacherProfile(auth, q.enrollmentId); // also enforces that the student is in the teacher's sections
+    const [sectionClass] = (await this.dataSource.query(
+      `SELECT c.grade_level
+         FROM sections s JOIN classes c ON c.id = s.class_id
+        WHERE s.id = $1`,
+      [p.section.id],
+    )) as Array<{ grade_level: number }>;
+    const classId = Number(sectionClass?.grade_level);
+    const categories = getAssessmentCategories(classId);
     const wb = this.excel.createWorkbook();
     const flags = p.flags ? flagLabels(p.flags) : '';
 
@@ -334,7 +366,7 @@ export class ReportsService {
         });
         if (c.kind === 'assessment') {
           const row: Record<string, CellValue> = { term: t.label, total: counted ? c.marks : null, state: STATE_LABEL[c.state] };
-          for (const cat of ASSESSMENT_CATEGORIES) row[cat.field] = c.scores ? c.scores[cat.field] : null;
+          for (const cat of categories) row[cat.field] = c.scores ? c.scores[cat.field] : null;
           categoryRows.push(row);
         }
       }
@@ -348,7 +380,12 @@ export class ReportsService {
     this.excel.addTable(wb, 'Assessment categories', {
       title: 'Continuous assessment by category',
       subtitle: `${p.student.fullName} (${p.student.studentId})  |  ${p.academicYear.label}`,
-      columns: [text('Term', 'term', 14), ...ASSESSMENT_CATEGORIES.map((c) => marks(`${c.name} (/${c.maxMarks})`, c.field, 18)), marks(`Total (/${ASSESSMENT_MAX_TOTAL})`, 'total'), text('Status', 'state', 12)],
+      columns: [
+        text('Term', 'term', 14),
+        ...categories.map((c) => marks(`${c.name} (/${c.maxMarks})`, c.field, 18)),
+        marks(`Total (/${getAssessmentMaxTotal(classId)})`, 'total'),
+        text('Status', 'state', 12),
+      ],
       rows: categoryRows,
     });
     this.excel.addTable(wb, 'Term averages', {
@@ -418,6 +455,7 @@ export class ReportsService {
     const withIndex = all.filter((r) => r.overallIndex !== null);
     const indexes = withIndex.map((r) => r.overallIndex as number);
     const assessmentByKey = new Map(data.assessments.map((a) => [`${a.enrollmentId}:${a.term}`, a]));
+    const classByEnrollment = new Map(data.enrollments.map((e) => [e.enrollmentId, e.classId]));
     const wb = this.excel.createWorkbook();
 
     const overview: Array<[string, CellValue]> = [
@@ -433,7 +471,9 @@ export class ReportsService {
       ['Examinations created', data.exams.length],
     ];
     for (const term of TERMS) {
-      const states = data.assessments.filter((a) => a.term === term).map((a) => assessmentState(a.scores, a.status === 'finalized'));
+      const states = data.assessments
+        .filter((a) => a.term === term)
+        .map((a) => assessmentState(a.scores, a.status === 'finalized', classByEnrollment.get(a.enrollmentId)!));
       overview.push([`${TERM_LABELS[term]} assessments complete`, `${states.filter(isCounted).length} of ${all.length}`]);
       overview.push([`${TERM_LABELS[term]} assessments finalized`, states.filter((s) => s === 'finalized').length]);
     }
@@ -459,18 +499,19 @@ export class ReportsService {
         text('Student ID', 'studentId', 16),
         text('Student Name', 'fullName', 32),
         text('Section', 'section', 10),
-        ...TERMS.map((t) => marks(`${TERM_LABELS[t]} assessment (/${ASSESSMENT_MAX_TOTAL})`, `a${t}`, 20)),
+        ...TERMS.map((t) => marks(`${TERM_LABELS[t]} assessment (/${getAssessmentMaxTotal(1)})`, `a${t}`, 20)),
         ...TERMS.map((t) => percent(`${TERM_LABELS[t]} average (%)`, `i${t}`, 18)),
         percent('Performance index (%)', 'index', 20),
         text('Trend', 'trend', 16),
         text('Monitoring flags', 'flags', 30),
       ],
       rows: all.map((r) => {
+        const classId = classByEnrollment.get(r.enrollmentId)!;
         const row: Record<string, CellValue> = { studentId: r.studentId, fullName: r.fullName, section: r.sectionLabel, index: r.overallIndex, trend: TREND_LABEL[r.trend], flags: flagLabels(r.flags) };
         for (const t of TERMS) {
           const a = assessmentByKey.get(`${r.enrollmentId}:${t}`);
-          const counted = a && isCounted(assessmentState(a.scores, a.status === 'finalized'));
-          row[`a${t}`] = a && counted ? assessmentTotal(a.scores) : null;
+          const counted = a && isCounted(assessmentState(a.scores, a.status === 'finalized', classId));
+          row[`a${t}`] = a && counted ? assessmentTotal(a.scores, classId) : null;
           row[`i${t}`] = r.terms.find((x) => x.term === t)!.index;
         }
         return row;
@@ -534,6 +575,9 @@ export class ReportsService {
   private async classPerformance(auth: AuthContext, q: ExportQuery): Promise<ExportFile> {
     const year = await this.requireYear(q);
     if (!q.sectionId) throw Errors.badRequest('Choose a section for this export.', undefined, 'SECTION_REQUIRED');
+    const scope = await this.resolveScope(auth, q, { sectionRequired: true });
+    const classId = scope.sections[0].classId;
+    const categories = getAssessmentCategories(classId);
     const a = await this.analytics.section(auth, year.id, q.sectionId); // enforces the teacher's section assignment
     const wb = this.excel.createWorkbook();
     const sub = `Academic year ${year.label}  |  Section ${a.section.label}  |  Exported ${today()}`;
@@ -585,17 +629,17 @@ export class ReportsService {
         int('Complete', 'entered'),
         int('Finalized', 'finalized'),
         int('Missing', 'missing'),
-        marks(`Average (/${ASSESSMENT_MAX_TOTAL})`, 'avg', 14),
+        marks(`Average (/${getAssessmentMaxTotal(classId)})`, 'avg', 14),
         marks('Highest', 'high', 10),
         marks('Lowest', 'low', 10),
         percent('Average (%)', 'avgPercent'),
-        ...ASSESSMENT_CATEGORIES.map((c) => marks(`${c.name} avg (/${c.maxMarks})`, c.field, 20)),
+        ...categories.map((c) => marks(`${c.name} avg (/${c.maxMarks})`, c.field, 20)),
       ],
       rows: a.assessmentPerformance.map((t) => {
         const row: Record<string, CellValue> = { term: t.label, enrolled: t.enrolled, entered: t.entered, finalized: t.finalized, missing: t.missing, avg: t.averageTotal, high: t.highestTotal, low: t.lowestTotal, avgPercent: t.averagePercent };
         for (const c of t.categories) {
-          const cat = ASSESSMENT_CATEGORIES.find((x) => x.code === c.code)!;
-          row[cat.field] = c.average;
+          const cat = categories.find((x) => x.code === c.code);
+          if (cat) row[cat.field] = c.average;
         }
         return row;
       }),
@@ -604,7 +648,7 @@ export class ReportsService {
       title: 'Examination performance',
       subtitle: sub,
       columns: [text('Examination', 'exam', 28), text('Term', 'term', 14), text('Date', 'date', 12), marks('Maximum', 'max', 10), int('Students', 'students'), int('Entered', 'entered'), int('Missing', 'missing'), marks('Average', 'avg', 10), percent('Average (%)', 'avgPercent'), marks('Highest', 'high', 10), marks('Lowest', 'low', 10)],
-      rows: a.examPerformance.map((x) => ({ exam: x.name, term: x.termLabel, date: x.examDate, max: x.maxMarks, students: x.enrolled, entered: x.entered, missing: x.missing, avg: x.average, avgPercent: x.averagePercent, high: x.highest, low: x.lowest })),
+    rows: a.examPerformance.map((x) => ({ exam: x.name, term: x.termLabel, date: x.examDate, max: x.maxMarks, students: x.enrolled, entered: x.entered, missing: x.missing, avg: x.average, avgPercent: x.averagePercent, high: x.highest, low: x.lowest })),
     });
     this.excel.addTable(wb, 'Distribution', { title: 'Performance index distribution', subtitle: sub, columns: [text('Range (%)', 'label', 14), int('Students', 'count')], rows: a.distribution.map((d) => ({ label: d.label, count: d.count })) });
 

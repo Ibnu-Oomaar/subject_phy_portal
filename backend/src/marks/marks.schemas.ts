@@ -1,20 +1,18 @@
+
 import { z } from 'zod';
-import { ASSESSMENT_MAX_BY_FIELD } from '../assessments/assessment-categories';
 import { hasAtMostTwoDecimals } from '../common/decimal';
 import { termSchema, uuidSchema } from '../common/schemas';
 
 const twoDecimals = (v: number) => hasAtMostTwoDecimals(v);
 
 /** undefined = leave unchanged · null = clear the value · number = set it (0 is a real mark). */
-const assessmentMark = (max: number) =>
-  z
-    .number('Enter a number')
-    .finite()
-    .min(0, 'Marks cannot be negative')
-    .max(max, `The maximum for this category is ${max}`)
-    .refine(twoDecimals, 'Use at most two decimal places')
-    .nullable()
-    .optional();
+const assessmentMark = z
+  .number('Enter a number')
+  .finite()
+  .min(0, 'Marks cannot be negative')
+  .refine(twoDecimals, 'Use at most two decimal places')
+  .nullable()
+  .optional();
 
 const optionalReason = z
   .string()
@@ -44,10 +42,14 @@ export const assessmentSaveSchema = z.object({
         enrollmentId: uuidSchema,
         /** The version the client loaded (0 when the student had no record yet). */
         version: z.number().int().min(0),
-        classActivities: assessmentMark(ASSESSMENT_MAX_BY_FIELD.classActivities),
-        homeworkAssignments: assessmentMark(ASSESSMENT_MAX_BY_FIELD.homeworkAssignments),
-        learningMaterialsNotebook: assessmentMark(ASSESSMENT_MAX_BY_FIELD.learningMaterialsNotebook),
-        textbook: assessmentMark(ASSESSMENT_MAX_BY_FIELD.textbook),
+        monthlyExamTest1: assessmentMark,
+        quantityOfHeatAssignments: assessmentMark,
+        electrostaticsAssignments: assessmentMark,
+        physicsNotebookAssessments: assessmentMark,
+        physicsTextbookAssessments: assessmentMark,
+        capacitorsNotesAssessments: assessmentMark,
+        propertiesOfMatterAssignment: assessmentMark,
+        heatAndTemperatureAssignment: assessmentMark,
       }),
     )
     .min(1, 'Nothing to save')

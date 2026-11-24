@@ -1,5 +1,6 @@
+
 import { describe, expect, test } from 'bun:test';
-import { ASSESSMENT_CATEGORIES, ASSESSMENT_MAX_TOTAL } from '../src/assessments/assessment-categories';
+import { getAssessmentCategories, getAssessmentMaxTotal } from '../src/assessments/assessment-categories';
 import {
   assessmentState,
   assessmentTotal,
@@ -15,37 +16,80 @@ import {
 } from '../src/results/calculations';
 import { computeStudentResults, type ScopeData } from '../src/results/student-results';
 
-const scores = (p: Partial<AssessmentScores>): AssessmentScores => ({ ...emptyScores(), ...p });
+const scores = (classId: number, p: Partial<AssessmentScores>): AssessmentScores => ({ ...emptyScores(classId), ...p });
 
-describe('fixed assessment structure', () => {
-  test('categories are 9 + 6 + 10 + 5 = 30', () => {
-    expect(ASSESSMENT_CATEGORIES.map((c) => c.maxMarks)).toEqual([9, 6, 10, 5]);
-    expect(ASSESSMENT_MAX_TOTAL).toBe(30);
+describe('class-specific assessment structure', () => {
+  test('Class 2 has five categories totaling 30 marks', () => {
+    expect(getAssessmentCategories(2).map((c) => c.maxMarks)).toEqual([10, 5, 5, 5, 5]);
+    expect(getAssessmentMaxTotal(2)).toBe(30);
+  });
+
+  test('Class 3 has six categories totaling 30 marks', () => {
+    expect(getAssessmentCategories(3).map((c) => c.maxMarks)).toEqual([5, 6, 5, 5, 5, 4]);
+    expect(getAssessmentMaxTotal(3)).toBe(30);
   });
 });
 
 describe('assessment totals and states', () => {
-  test('a complete record totals out of 30', () => {
-    const s = scores({ classActivities: 9, homeworkAssignments: 6, learningMaterialsNotebook: 10, textbook: 5 });
-    expect(assessmentTotal(s)).toBe(30);
-    expect(assessmentState(s, false)).toBe('entered');
-    expect(assessmentState(s, true)).toBe('finalized');
+  test('a complete Class 2 record totals out of 30', () => {
+    const s = scores(2, {
+      monthlyExamTest1: 10,
+      propertiesOfMatterAssignment: 5,
+      heatAndTemperatureAssignment: 5,
+      physicsNotebookAssessments: 5,
+      physicsTextbookAssessments: 5,
+    });
+    expect(assessmentTotal(s, 2)).toBe(30);
+    expect(assessmentState(s, false, 2)).toBe('entered');
+    expect(assessmentState(s, true, 2)).toBe('finalized');
   });
+
+  test('a complete Class 3 record totals out of 30', () => {
+    const s = scores(3, {
+      monthlyExamTest1: 5,
+      quantityOfHeatAssignments: 6,
+      electrostaticsAssignments: 5,
+      physicsNotebookAssessments: 5,
+      physicsTextbookAssessments: 5,
+      capacitorsNotesAssessments: 4,
+    });
+    expect(assessmentTotal(s, 3)).toBe(30);
+    expect(assessmentState(s, false, 3)).toBe('entered');
+    expect(assessmentState(s, true, 3)).toBe('finalized');
+  });
+
   test('nothing entered is missing and has NO total (never zero)', () => {
-    expect(assessmentTotal(emptyScores())).toBeNull();
-    expect(assessmentState(emptyScores(), false)).toBe('missing');
+    expect(assessmentTotal(emptyScores(2), 2)).toBeNull();
+    expect(assessmentState(emptyScores(2), false, 2)).toBe('missing');
+    expect(assessmentTotal(emptyScores(3), 3)).toBeNull();
+    expect(assessmentState(emptyScores(3), false, 3)).toBe('missing');
   });
+
   test('an explicit zero is a real mark, not missing', () => {
-    const s = scores({ classActivities: 0, homeworkAssignments: 0, learningMaterialsNotebook: 0, textbook: 0 });
-    expect(assessmentTotal(s)).toBe(0);
-    expect(assessmentState(s, false)).toBe('entered');
+    const s = scores(2, {
+      monthlyExamTest1: 0,
+      propertiesOfMatterAssignment: 0,
+      heatAndTemperatureAssignment: 0,
+      physicsNotebookAssessments: 0,
+      physicsTextbookAssessments: 0,
+    });
+    expect(assessmentTotal(s, 2)).toBe(0);
+    expect(assessmentState(s, false, 2)).toBe('entered');
   });
+
   test('some categories entered is partial', () => {
-    expect(assessmentState(scores({ classActivities: 7 }), false)).toBe('partial');
+    expect(assessmentState(scores(2, { monthlyExamTest1: 7 }), false, 2)).toBe('partial');
   });
+
   test('decimal marks add without floating point drift', () => {
-    const s = scores({ classActivities: 0.1, homeworkAssignments: 0.2, learningMaterialsNotebook: 7.35, textbook: 4.1 });
-    expect(assessmentTotal(s)).toBe(11.75);
+    const s = scores(2, {
+      monthlyExamTest1: 0.1,
+      propertiesOfMatterAssignment: 0.2,
+      heatAndTemperatureAssignment: 2.35,
+      physicsNotebookAssessments: 4.1,
+      physicsTextbookAssessments: 5,
+    });
+    expect(assessmentTotal(s, 2)).toBe(11.75);
   });
 });
 
@@ -105,12 +149,23 @@ describe('trend and classification', () => {
 describe('student results (assessment and exams kept separate, missing never zero)', () => {
   const base: ScopeData = {
     enrollments: [
-      { enrollmentId: 'e1', studentUuid: 's1', studentId: 'S1', fullName: 'One', sectionId: 'B', sectionLabel: '1B' },
-      { enrollmentId: 'e2', studentUuid: 's2', studentId: 'S2', fullName: 'Two', sectionId: 'B', sectionLabel: '1B' },
+      { enrollmentId: 'e1', studentUuid: 's1', studentId: 'S1', fullName: 'One', sectionId: 'B', sectionLabel: '2B', classId: 2 },
+      { enrollmentId: 'e2', studentUuid: 's2', studentId: 'S2', fullName: 'Two', sectionId: 'B', sectionLabel: '2B', classId: 2 },
     ],
     assessments: [
-      { enrollmentId: 'e1', term: 1, status: 'finalized', scores: scores({ classActivities: 9, homeworkAssignments: 6, learningMaterialsNotebook: 10, textbook: 5 }) },
-      { enrollmentId: 'e2', term: 1, status: 'entered', scores: scores({ classActivities: 4 }) },
+      {
+        enrollmentId: 'e1',
+        term: 1,
+        status: 'finalized',
+        scores: scores(2, {
+          monthlyExamTest1: 10,
+          propertiesOfMatterAssignment: 5,
+          heatAndTemperatureAssignment: 5,
+          physicsNotebookAssessments: 5,
+          physicsTextbookAssessments: 5,
+        }),
+      },
+      { enrollmentId: 'e2', term: 1, status: 'entered', scores: scores(2, { monthlyExamTest1: 4 }) },
     ],
     exams: [
       { examId: 'x1', sectionId: 'B', term: 1, name: 'Term 1 Exam', maxMarks: 50, examDate: null },

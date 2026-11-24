@@ -1,3 +1,4 @@
+
 import { Check, Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn, Unique, UpdateDateColumn } from 'typeorm';
 import type { Relation } from 'typeorm';
 import { numericTransformer } from '../common/decimal';
@@ -14,10 +15,14 @@ export type RecordStatus = 'entered' | 'finalized';
 @Unique(['enrollmentId', 'term'])
 @Index('idx_assessments_enrollment', ['enrollmentId'])
 @Check(`"term" BETWEEN 1 AND 3`)
-@Check(`"class_activities" IS NULL OR ("class_activities" >= 0 AND "class_activities" <= 9)`)
-@Check(`"homework_assignments" IS NULL OR ("homework_assignments" >= 0 AND "homework_assignments" <= 6)`)
-@Check(`"learning_materials_notebook" IS NULL OR ("learning_materials_notebook" >= 0 AND "learning_materials_notebook" <= 10)`)
-@Check(`"textbook" IS NULL OR ("textbook" >= 0 AND "textbook" <= 5)`)
+@Check(`"monthly_exam_test_1" IS NULL OR ("monthly_exam_test_1" >= 0 AND "monthly_exam_test_1" <= 10)`)
+@Check(`"quantity_of_heat_assignments" IS NULL OR ("quantity_of_heat_assignments" >= 0 AND "quantity_of_heat_assignments" <= 6)`)
+@Check(`"electrostatics_assignments" IS NULL OR ("electrostatics_assignments" >= 0 AND "electrostatics_assignments" <= 5)`)
+@Check(`"physics_notebook_assessments" IS NULL OR ("physics_notebook_assessments" >= 0 AND "physics_notebook_assessments" <= 5)`)
+@Check(`"physics_textbook_assessments" IS NULL OR ("physics_textbook_assessments" >= 0 AND "physics_textbook_assessments" <= 5)`)
+@Check(`"capacitors_notes_assessments" IS NULL OR ("capacitors_notes_assessments" >= 0 AND "capacitors_notes_assessments" <= 4)`)
+@Check(`"properties_of_matter_assignment" IS NULL OR ("properties_of_matter_assignment" >= 0 AND "properties_of_matter_assignment" <= 5)`)
+@Check(`"heat_and_temperature_assignment" IS NULL OR ("heat_and_temperature_assignment" >= 0 AND "heat_and_temperature_assignment" <= 5)`)
 @Check(`"status" IN ('entered', 'finalized')`)
 export class AssessmentRecord {
   @PrimaryGeneratedColumn('uuid')
@@ -33,17 +38,29 @@ export class AssessmentRecord {
   @Column({ name: 'term', type: 'smallint' })
   term!: number;
 
-  @Column({ name: 'class_activities', type: 'numeric', precision: 4, scale: 2, nullable: true, transformer: numericTransformer })
-  classActivities!: number | null;
+  @Column({ name: 'monthly_exam_test_1', type: 'numeric', precision: 4, scale: 2, nullable: true, transformer: numericTransformer })
+  monthlyExamTest1!: number | null;
 
-  @Column({ name: 'homework_assignments', type: 'numeric', precision: 4, scale: 2, nullable: true, transformer: numericTransformer })
-  homeworkAssignments!: number | null;
+  @Column({ name: 'quantity_of_heat_assignments', type: 'numeric', precision: 4, scale: 2, nullable: true, transformer: numericTransformer })
+  quantityOfHeatAssignments!: number | null;
 
-  @Column({ name: 'learning_materials_notebook', type: 'numeric', precision: 4, scale: 2, nullable: true, transformer: numericTransformer })
-  learningMaterialsNotebook!: number | null;
+  @Column({ name: 'electrostatics_assignments', type: 'numeric', precision: 4, scale: 2, nullable: true, transformer: numericTransformer })
+  electrostaticsAssignments!: number | null;
 
-  @Column({ name: 'textbook', type: 'numeric', precision: 4, scale: 2, nullable: true, transformer: numericTransformer })
-  textbook!: number | null;
+  @Column({ name: 'physics_notebook_assessments', type: 'numeric', precision: 4, scale: 2, nullable: true, transformer: numericTransformer })
+  physicsNotebookAssessments!: number | null;
+
+  @Column({ name: 'physics_textbook_assessments', type: 'numeric', precision: 4, scale: 2, nullable: true, transformer: numericTransformer })
+  physicsTextbookAssessments!: number | null;
+
+  @Column({ name: 'capacitors_notes_assessments', type: 'numeric', precision: 4, scale: 2, nullable: true, transformer: numericTransformer })
+  capacitorsNotesAssessments!: number | null;
+
+  @Column({ name: 'properties_of_matter_assignment', type: 'numeric', precision: 4, scale: 2, nullable: true, transformer: numericTransformer })
+  propertiesOfMatterAssignment!: number | null;
+
+  @Column({ name: 'heat_and_temperature_assignment', type: 'numeric', precision: 4, scale: 2, nullable: true, transformer: numericTransformer })
+  heatAndTemperatureAssignment!: number | null;
 
   @Column({ name: 'status', type: 'varchar', length: 10, default: 'entered' })
   status!: RecordStatus;

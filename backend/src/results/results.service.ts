@@ -1,3 +1,4 @@
+
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -51,15 +52,29 @@ export class ResultsService {
     if (!sectionIds.length) return { enrollments: [], assessments: [], exams: [], examMarks: [] };
     const [enrollments, assessments, exams, examMarks] = await Promise.all([
       this.dataSource.query(
-        `SELECT e.id AS enrollment_id, s.id AS student_uuid, s.student_id, s.full_name, sec.id AS section_id, sec.label AS section_label
-           FROM enrollments e JOIN students s ON s.id = e.student_id JOIN sections sec ON sec.id = e.section_id
+        `SELECT e.id AS enrollment_id, s.id AS student_uuid, s.student_id, s.full_name,
+                sec.id AS section_id, sec.label AS section_label, c.grade_level
+           FROM enrollments e
+           JOIN students s ON s.id = e.student_id
+           JOIN sections sec ON sec.id = e.section_id
+           JOIN classes c ON c.id = sec.class_id
           WHERE e.academic_year_id = $1 AND e.section_id = ANY($2::uuid[])
           ORDER BY sec.label, s.full_name, s.student_id`,
         [yearId, sectionIds],
       ),
       this.dataSource.query(
-        `SELECT a.enrollment_id, a.term, a.class_activities, a.homework_assignments, a.learning_materials_notebook, a.textbook, a.status
-           FROM assessments a JOIN enrollments e ON e.id = a.enrollment_id
+        `SELECT a.enrollment_id, a.term,
+                a.monthly_exam_test_1,
+                a.quantity_of_heat_assignments,
+                a.electrostatics_assignments,
+                a.physics_notebook_assessments,
+                a.physics_textbook_assessments,
+                a.capacitors_notes_assessments,
+                a.properties_of_matter_assignment,
+                a.heat_and_temperature_assignment,
+                a.status
+           FROM assessments a
+           JOIN enrollments e ON e.id = a.enrollment_id
           WHERE e.academic_year_id = $1 AND e.section_id = ANY($2::uuid[])`,
         [yearId, sectionIds],
       ),
@@ -83,13 +98,26 @@ export class ResultsService {
     if (!enrollmentIds.length) return { enrollments: [], assessments: [], exams: [], examMarks: [] };
     const [enrollments, assessments, exams, examMarks] = await Promise.all([
       this.dataSource.query(
-        `SELECT e.id AS enrollment_id, s.id AS student_uuid, s.student_id, s.full_name, sec.id AS section_id, sec.label AS section_label
-           FROM enrollments e JOIN students s ON s.id = e.student_id JOIN sections sec ON sec.id = e.section_id
+        `SELECT e.id AS enrollment_id, s.id AS student_uuid, s.student_id, s.full_name,
+                sec.id AS section_id, sec.label AS section_label, c.grade_level
+           FROM enrollments e
+           JOIN students s ON s.id = e.student_id
+           JOIN sections sec ON sec.id = e.section_id
+           JOIN classes c ON c.id = sec.class_id
           WHERE e.id = ANY($1::uuid[])`,
         [enrollmentIds],
       ),
       this.dataSource.query(
-        `SELECT enrollment_id, term, class_activities, homework_assignments, learning_materials_notebook, textbook, status
+        `SELECT enrollment_id, term,
+                monthly_exam_test_1,
+                quantity_of_heat_assignments,
+                electrostatics_assignments,
+                physics_notebook_assessments,
+                physics_textbook_assessments,
+                capacitors_notes_assessments,
+                properties_of_matter_assignment,
+                heat_and_temperature_assignment,
+                status
            FROM assessments WHERE enrollment_id = ANY($1::uuid[])`,
         [enrollmentIds],
       ),
@@ -186,9 +214,14 @@ export class ResultsService {
   /** Drops results the student is not allowed to see yet (see studentVisibleStates). */
   private onlyVisibleStates(data: ScopeData): ScopeData {
     const ok = new Set<string>(RESULTS_CONFIG.studentVisibleStates);
+    const classIds = new Map(data.enrollments.map((e) => [e.enrollmentId, e.classId]));
+
     return {
       ...data,
-      assessments: data.assessments.filter((a) => ok.has(assessmentState(a.scores, a.status === 'finalized'))),
+      assessments: data.assessments.filter((a) => {
+        const classId = classIds.get(a.enrollmentId);
+        return classId !== undefined && ok.has(assessmentState(a.scores, a.status === 'finalized', classId));
+      }),
       examMarks: data.examMarks.filter((m) => ok.has(m.status)),
     };
   }
@@ -202,6 +235,7 @@ export class ResultsService {
         fullName: r.full_name,
         sectionId: r.section_id,
         sectionLabel: r.section_label,
+        classId: Number(r.grade_level),
       })),
       assessments: assessments.map(
         (r): AssessmentRow => ({
@@ -209,10 +243,14 @@ export class ResultsService {
           term: Number(r.term),
           status: r.status,
           scores: {
-            classActivities: num(r.class_activities),
-            homeworkAssignments: num(r.homework_assignments),
-            learningMaterialsNotebook: num(r.learning_materials_notebook),
-            textbook: num(r.textbook),
+            monthlyExamTest1: num(r.monthly_exam_test_1),
+            quantityOfHeatAssignments: num(r.quantity_of_heat_assignments),
+            electrostaticsAssignments: num(r.electrostatics_assignments),
+            physicsNotebookAssessments: num(r.physics_notebook_assessments),
+            physicsTextbookAssessments: num(r.physics_textbook_assessments),
+            capacitorsNotesAssessments: num(r.capacitors_notes_assessments),
+            propertiesOfMatterAssignment: num(r.properties_of_matter_assignment),
+            heatAndTemperatureAssignment: num(r.heat_and_temperature_assignment),
           } satisfies AssessmentScores,
         }),
       ),

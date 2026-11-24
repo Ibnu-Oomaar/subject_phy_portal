@@ -1,7 +1,8 @@
+
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { ASSESSMENT_CATEGORIES, ASSESSMENT_MAX_TOTAL } from '../assessments/assessment-categories';
+import { getAssessmentCategories } from '../assessments/assessment-categories';
 import { Errors } from '../common/errors';
 import type { AuthContext, ResultState } from '../common/types';
 import { TERMS, TERM_LABELS } from '../common/types';
@@ -73,18 +74,21 @@ export class AnalyticsService {
   async section(auth: AuthContext, yearId: string, sectionId: string) {
     await this.scope.assertSection(auth, sectionId);
     const year = await this.getYear(yearId);
-    const [{ class_id: classId, label }] = (await this.dataSource.query(`SELECT class_id, label FROM sections WHERE id = $1`, [sectionId])) as Array<{ class_id: string; label: string }>;
+    const [{ class_id: classId, grade_level: gradeLevel, label }] = (await this.dataSource.query(
+      `SELECT s.class_id, c.grade_level, s.label FROM sections s JOIN classes c ON c.id = s.class_id WHERE s.id = $1`,
+      [sectionId],
+    )) as Array<{ class_id: string; grade_level: number; label: string }>;
     const mine = await this.scope.sectionIds(auth.userId);
     const classSections: Array<{ id: string; label: string }> = await this.dataSource.query(
       `SELECT id, label FROM sections WHERE class_id = $1 AND id = ANY($2::uuid[]) ORDER BY label`,
       [classId, mine],
     );
     const key = `section:${sectionId}:${classSections.map((s) => s.id).join(',')}`;
-    const body = await this.state.cached(`year:${yearId}`, key, CACHE_SECONDS, () => this.buildSection(sectionId, label, classSections, yearId));
+    const body = await this.state.cached(`year:${yearId}`, key, CACHE_SECONDS, () => this.buildSection(sectionId, label, classSections, yearId, gradeLevel));
     return { academicYear: year, ...body };
   }
 
-  private async buildSection(sectionId: string, sectionLabel: string, classSections: Array<{ id: string; label: string }>, yearId: string) {
+  private async buildSection(sectionId: string, sectionLabel: string, classSections: Array<{ id: string; label: string }>, yearId: string, classId: number) {
     const data = await this.results.loadScope(yearId, classSections.map((s) => s.id));
     const everyone = computeStudentResults(data);
     const mine = everyone.filter((r) => r.sectionId === sectionId);
@@ -108,12 +112,13 @@ export class AnalyticsService {
     });
     const classIndexes = everyone.filter((r) => r.overallIndex !== null).map((r) => r.overallIndex as number);
 
+    const assessmentCategories = getAssessmentCategories(classId);
     const assessmentPerformance = TERMS.map((term) => {
       const records = myData.assessments
         .filter((a) => a.term === term)
-        .map((a) => ({ a, state: assessmentState(a.scores, a.status === 'finalized') }));
+        .map((a) => ({ a, state: assessmentState(a.scores, a.status === 'finalized', classId) }));
       const counted = records.filter((r) => isCounted(r.state));
-      const totals = counted.map((r) => assessmentTotal(r.a.scores) as number);
+      const totals = counted.map((r) => assessmentTotal(r.a.scores, classId) as number);
       const sum = summarize(totals);
       return {
         term,
@@ -122,12 +127,12 @@ export class AnalyticsService {
         entered: counted.length,
         finalized: records.filter((r) => r.state === 'finalized').length,
         missing: mine.length - counted.length,
-        maxTotal: ASSESSMENT_MAX_TOTAL,
+        maxTotal: 30,
         averageTotal: sum.average,
         highestTotal: sum.highest,
         lowestTotal: sum.lowest,
-        averagePercent: sum.average === null ? null : assessmentPercent(sum.average),
-        categories: ASSESSMENT_CATEGORIES.map((c) => ({
+        averagePercent: sum.average === null ? null : assessmentPercent(sum.average, classId),
+        categories: assessmentCategories.map((c) => ({
           code: c.code,
           name: c.name,
           maxMarks: c.maxMarks,
@@ -217,10 +222,13 @@ export class AnalyticsService {
     const data = await this.results.loadScope(yearId, sectionIds);
     const all = computeStudentResults(data);
     const sections: Array<{ id: string; label: string }> = await this.dataSource.query(`SELECT id, label FROM sections WHERE id = ANY($1::uuid[]) ORDER BY label`, [sectionIds]);
+    const classIdByEnrollment = new Map(data.enrollments.map((e) => [e.enrollmentId, e.classId]));
+    const assessmentStateOf = (a: ScopeData['assessments'][number]) =>
+      assessmentState(a.scores, a.status === 'finalized', classIdByEnrollment.get(a.enrollmentId)!);
 
     // assessment completion per term
     const assessmentByTerm = TERMS.map((term) => {
-      const records = data.assessments.filter((a) => a.term === term).map((a) => assessmentState(a.scores, a.status === 'finalized'));
+      const records = data.assessments.filter((a) => a.term === term).map(assessmentStateOf);
       const counted = records.filter(isCounted).length;
       return {
         term,
@@ -253,7 +261,8 @@ export class AnalyticsService {
       const students = all.filter((r) => r.sectionId === s.id);
       const idx = students.map((r) => r.overallIndex).filter((v): v is number => v !== null);
       const aExpected = students.length * TERMS.length;
-      const aEntered = data.assessments.filter((a) => students.some((st) => st.enrollmentId === a.enrollmentId) && isCounted(assessmentState(a.scores, a.status === 'finalized'))).length;
+      const studentEnrollmentIds = new Set(students.map((st) => st.enrollmentId));
+      const aEntered = data.assessments.filter((a) => studentEnrollmentIds.has(a.enrollmentId) && isCounted(assessmentStateOf(a))).length;
       const exams = examsOut.filter((x) => x.sectionId === s.id);
       return {
         sectionId: s.id,

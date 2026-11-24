@@ -1,4 +1,5 @@
-import { ASSESSMENT_MAX_TOTAL } from '../assessments/assessment-categories';
+
+import { getAssessmentMaxTotal } from '../assessments/assessment-categories';
 import type { ResultState, Term } from '../common/types';
 import { TERMS, TERM_LABELS } from '../common/types';
 import {
@@ -24,6 +25,7 @@ export interface EnrollmentRow {
   fullName: string;
   sectionId: string;
   sectionLabel: string;
+  classId: number;
 }
 export interface AssessmentRow {
   enrollmentId: string;
@@ -103,13 +105,16 @@ export function computeStudentResults(data: ScopeData): StudentResult[] {
   const marksByKey = new Map(data.examMarks.map((m) => [`${m.examId}:${m.enrollmentId}`, m]));
 
   return data.enrollments.map((enrollment) => {
+    const classId = enrollment.classId;
+    const assessmentMaxTotal = getAssessmentMaxTotal(classId);
+
     const terms: TermResult[] = TERMS.map((term) => {
       const components: ResultComponent[] = [];
 
       const assessment = assessmentsByKey.get(`${enrollment.enrollmentId}:${term}`);
       if (assessment) {
-        const total = assessmentTotal(assessment.scores);
-        const state = assessmentState(assessment.scores, assessment.status === 'finalized');
+        const total = assessmentTotal(assessment.scores, classId);
+        const state = assessmentState(assessment.scores, assessment.status === 'finalized', classId);
         components.push({
           kind: 'assessment',
           term,
@@ -117,8 +122,8 @@ export function computeStudentResults(data: ScopeData): StudentResult[] {
           examId: null,
           examDate: null,
           marks: total,
-          max: ASSESSMENT_MAX_TOTAL,
-          percent: isCounted(state) && total !== null ? assessmentPercent(total) : null,
+          max: assessmentMaxTotal,
+          percent: isCounted(state) && total !== null ? assessmentPercent(total, classId) : null,
           state,
           scores: assessment.scores,
         });
@@ -130,7 +135,7 @@ export function computeStudentResults(data: ScopeData): StudentResult[] {
           examId: null,
           examDate: null,
           marks: null,
-          max: ASSESSMENT_MAX_TOTAL,
+          max: assessmentMaxTotal,
           percent: null,
           state: 'missing',
           scores: null,
@@ -140,6 +145,7 @@ export function computeStudentResults(data: ScopeData): StudentResult[] {
       const exams = data.exams
         .filter((e) => e.sectionId === enrollment.sectionId && e.term === term)
         .sort((a, b) => (a.examDate ?? '').localeCompare(b.examDate ?? '') || a.name.localeCompare(b.name));
+
       for (const exam of exams) {
         const mark = marksByKey.get(`${exam.examId}:${enrollment.enrollmentId}`);
         components.push({
@@ -162,6 +168,7 @@ export function computeStudentResults(data: ScopeData): StudentResult[] {
 
     const overallIndex = meanOfTermMeans(terms);
     const { trend, delta } = trendOf(terms.map((t) => ({ term: t.term, index: t.index })), RESULTS_CONFIG.thresholds.trendBand);
+
     return {
       enrollmentId: enrollment.enrollmentId,
       studentUuid: enrollment.studentUuid,

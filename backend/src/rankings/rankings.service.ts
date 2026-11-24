@@ -1,7 +1,8 @@
+
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { ASSESSMENT_MAX_TOTAL } from '../assessments/assessment-categories';
+import { getAssessmentMaxTotal } from '../assessments/assessment-categories';
 import { Errors } from '../common/errors';
 import type { AuthContext, Term } from '../common/types';
 import { TERM_LABELS } from '../common/types';
@@ -61,13 +62,24 @@ export class RankingsService {
     const [year] = (await this.dataSource.query(`SELECT label FROM academic_years WHERE id = $1`, [q.academicYearId])) as Array<{ label: string }>;
     if (!year) throw Errors.notFound('Academic year');
 
-    let sections: Array<{ id: string; label: string }>;
+    let sections: Array<{ id: string; label: string; classId: number }>;
     if (q.scope === 'section') {
-      sections = await this.dataSource.query(`SELECT id, label FROM sections WHERE id = $1`, [q.sectionId]);
+      sections = await this.dataSource.query(
+        `SELECT s.id, s.label, c.grade_level AS "classId"
+         FROM sections s
+         JOIN classes c ON c.id = s.class_id
+         WHERE s.id = $1`,
+        [q.sectionId],
+      );
     } else {
       const mine = await this.scope.sectionIds(auth.userId);
       sections = await this.dataSource.query(
-        `SELECT id, label FROM sections WHERE class_id = (SELECT class_id FROM sections WHERE id = $1) AND id = ANY($2::uuid[]) ORDER BY label`,
+        `SELECT s.id, s.label, c.grade_level AS "classId"
+         FROM sections s
+         JOIN classes c ON c.id = s.class_id
+         WHERE s.class_id = (SELECT class_id FROM sections WHERE id = $1)
+         AND s.id = ANY($2::uuid[])
+         ORDER BY s.label`,
         [q.sectionId, mine],
       );
     }
@@ -76,7 +88,7 @@ export class RankingsService {
     return body;
   }
 
-  private async compute(q: RankingQuery, sections: Array<{ id: string; label: string }>, yearLabel: string): Promise<RankingResult> {
+  private async compute(q: RankingQuery, sections: Array<{ id: string; label: string; classId: number }>, yearLabel: string): Promise<RankingResult> {
     const data = await this.results.loadScope(q.academicYearId, sections.map((s) => s.id));
     type Candidate = { enrollmentId: string; studentId: string; fullName: string; sectionLabel: string; marks: number | null; max: number | null; percent: number };
     const candidates: Candidate[] = [];
@@ -92,13 +104,14 @@ export class RankingsService {
     } else if (q.kind === 'assessment') {
       const term = q.term as Term;
       title = `${TERM_LABELS[term]} assessment`;
-      context = `Out of ${ASSESSMENT_MAX_TOTAL}. Only complete assessments are ranked.`;
+      context = `Out of ${getAssessmentMaxTotal(sections[0].classId)}. Only complete assessments are ranked.`;
       const byEnrollment = new Map(data.assessments.filter((a) => a.term === term).map((a) => [a.enrollmentId, a]));
       for (const e of data.enrollments) {
         const a = byEnrollment.get(e.enrollmentId);
-        if (!a || !isCounted(assessmentState(a.scores, a.status === 'finalized'))) continue;
-        const total = assessmentTotal(a.scores) as number;
-        candidates.push({ ...pick(e), marks: total, max: ASSESSMENT_MAX_TOTAL, percent: assessmentPercent(total) });
+        if (!a || !isCounted(assessmentState(a.scores, a.status === 'finalized', e.classId))) continue;
+        const total = assessmentTotal(a.scores, e.classId) as number;
+        const max = getAssessmentMaxTotal(e.classId);
+        candidates.push({ ...pick(e), marks: total, max, percent: assessmentPercent(total, e.classId) });
       }
     } else {
       const [ref] = (await this.dataSource.query(`SELECT id, section_id, term, name, academic_year_id FROM examinations WHERE id = $1`, [q.examId])) as Array<{

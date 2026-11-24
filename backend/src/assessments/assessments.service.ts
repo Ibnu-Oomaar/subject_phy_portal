@@ -1,15 +1,19 @@
+
 import { Injectable } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { Errors } from '../common/errors';
 import type { AuthContext, ResultState, Term } from '../common/types';
 import { TERM_LABELS } from '../common/types';
+import {
+  getAssessmentCategories,
+  getAssessmentMaxTotal,
+  type AssessmentField,
+} from './assessment-categories';
 import { assessmentPercent, assessmentState, assessmentTotal, isCounted, type AssessmentScores } from '../results/calculations';
 import { AuditService } from '../security/audit.service';
 import { TeacherScopeService } from '../teachers/teachers.service';
 import { StudentsService } from '../students/students.service';
-import { ASSESSMENT_CATEGORIES, ASSESSMENT_MAX_TOTAL } from './assessment-categories';
-import { AssessmentCategory } from './assessment-category.entity';
 
 const num = (v: string | number | null): number | null => (v === null || v === undefined ? null : Number(v));
 
@@ -30,20 +34,30 @@ export interface AssessmentRowView {
 @Injectable()
 export class AssessmentsService {
   constructor(
-    @InjectRepository(AssessmentCategory) private readonly categories: Repository<AssessmentCategory>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly scope: TeacherScopeService,
     private readonly students: StudentsService,
     private readonly audit: AuditService,
   ) {}
 
-  /** The fixed categories, read from the (seeded, read-only) reference table. */
-  async listCategories() {
-    const rows = await this.categories.find({ order: { sortOrder: 'ASC' } });
-    const byCode = new Map(ASSESSMENT_CATEGORIES.map((c) => [c.code as string, c]));
+  /** The fixed categories, configured separately for each class. */
+  async listCategories(classId?: number) {
+    const classIds = classId === undefined ? [2, 3] : [classId];
+
+    const categories = classIds.flatMap((id) =>
+      getAssessmentCategories(id).map((category) => ({
+        classId: id,
+        code: category.code,
+        field: category.field,
+        name: category.name,
+        maxMarks: category.maxMarks,
+        sortOrder: category.sortOrder,
+      })),
+    );
+
     return {
-      categories: rows.map((r) => ({ code: r.code, field: byCode.get(r.code)?.field ?? r.code, name: r.name, maxMarks: r.maxMarks })),
-      maxTotal: rows.reduce((sum, r) => sum + r.maxMarks, 0) || ASSESSMENT_MAX_TOTAL,
+      categories,
+      maxTotal: classId === undefined ? 30 : getAssessmentMaxTotal(classId),
     };
   }
 
@@ -52,30 +66,61 @@ export class AssessmentsService {
     q: { academicYearId: string; sectionId: string; term: Term; state?: ResultState; search?: string },
   ) {
     await this.scope.assertSection(auth, q.sectionId);
-    const [year] = (await this.dataSource.query(`SELECT id, label, status FROM academic_years WHERE id = $1`, [q.academicYearId])) as Array<{
+
+    const [year] = (await this.dataSource.query(
+      `SELECT id, label, status FROM academic_years WHERE id = $1`,
+      [q.academicYearId],
+    )) as Array<{
       id: string;
       label: string;
       status: 'planned' | 'active' | 'closed';
     }>;
+
     if (!year) throw Errors.notFound('Academic year');
-    const [section] = (await this.dataSource.query(`SELECT id, label FROM sections WHERE id = $1`, [q.sectionId])) as Array<{ id: string; label: string }>;
+
+    const [section] = (await this.dataSource.query(
+      `SELECT s.id, s.label, c.grade_level
+         FROM sections s
+         JOIN classes c ON c.id = s.class_id
+        WHERE s.id = $1`,
+      [q.sectionId],
+    )) as Array<{ id: string; label: string; grade_level: number }>;
+
+    if (!section) throw Errors.notFound('Section');
+
+    const classId = Number(section.grade_level);
+    const categories = getAssessmentCategories(classId);
+    const fields = categories.map((category) => category.field);
+    const maxTotal = getAssessmentMaxTotal(classId);
 
     const rows: Array<{
       enrollment_id: string;
       student_id: string;
       full_name: string;
       assessment_id: string | null;
-      class_activities: string | null;
-      homework_assignments: string | null;
-      learning_materials_notebook: string | null;
-      textbook: string | null;
+      monthly_exam_test_1: string | null;
+      quantity_of_heat_assignments: string | null;
+      electrostatics_assignments: string | null;
+      physics_notebook_assessments: string | null;
+      physics_textbook_assessments: string | null;
+      capacitors_notes_assessments: string | null;
+      properties_of_matter_assignment: string | null;
+      heat_and_temperature_assignment: string | null;
       status: 'entered' | 'finalized' | null;
       version: number | null;
       updated_at: Date | null;
     }> = await this.dataSource.query(
       `SELECT e.id AS enrollment_id, s.student_id, s.full_name,
-              a.id AS assessment_id, a.class_activities, a.homework_assignments, a.learning_materials_notebook,
-              a.textbook, a.status, a.version, a.updated_at
+              a.id AS assessment_id,
+              a.monthly_exam_test_1,
+              a.quantity_of_heat_assignments,
+              a.electrostatics_assignments,
+              a.physics_notebook_assessments,
+              a.physics_textbook_assessments,
+              a.capacitors_notes_assessments,
+              a.properties_of_matter_assignment,
+              a.heat_and_temperature_assignment,
+              a.status, a.version, a.updated_at
          FROM enrollments e
          JOIN students s ON s.id = e.student_id
          LEFT JOIN assessments a ON a.enrollment_id = e.id AND a.term = $3
@@ -86,20 +131,26 @@ export class AssessmentsService {
 
     const all: AssessmentRowView[] = rows.map((r) => {
       const scores: AssessmentScores = {
-        classActivities: num(r.class_activities),
-        homeworkAssignments: num(r.homework_assignments),
-        learningMaterialsNotebook: num(r.learning_materials_notebook),
-        textbook: num(r.textbook),
+        monthlyExamTest1: num(r.monthly_exam_test_1),
+        quantityOfHeatAssignments: num(r.quantity_of_heat_assignments),
+        electrostaticsAssignments: num(r.electrostatics_assignments),
+        physicsNotebookAssessments: num(r.physics_notebook_assessments),
+        physicsTextbookAssessments: num(r.physics_textbook_assessments),
+        capacitorsNotesAssessments: num(r.capacitors_notes_assessments),
+        propertiesOfMatterAssignment: num(r.properties_of_matter_assignment),
+        heatAndTemperatureAssignment: num(r.heat_and_temperature_assignment),
       };
-      const state = assessmentState(scores, r.status === 'finalized');
-      const total = assessmentTotal(scores);
+
+      const state = assessmentState(scores, r.status === 'finalized', classId);
+      const total = assessmentTotal(scores, classId);
+
       return {
         enrollmentId: r.enrollment_id,
         studentId: r.student_id,
         fullName: r.full_name,
         scores,
         total,
-        percent: isCounted(state) && total !== null ? assessmentPercent(total) : null,
+        percent: isCounted(state) && total !== null ? assessmentPercent(total, classId) : null,
         state,
         version: r.version ?? 0,
         recordId: r.assessment_id,
@@ -109,19 +160,33 @@ export class AssessmentsService {
 
     const count = (s: ResultState) => all.filter((r) => r.state === s).length;
     const needle = q.search?.toLowerCase();
+
     const filtered = all.filter(
       (r) => (!q.state || r.state === q.state) && (!needle || r.fullName.toLowerCase().includes(needle) || r.studentId.toLowerCase().includes(needle)),
     );
+
     return {
       academicYear: year,
-      section,
+      section: { id: section.id, label: section.label },
+      classId,
       term: q.term,
       termLabel: TERM_LABELS[q.term],
       /** In a closed year every change needs a correction reason. */
       locked: year.status === 'closed',
-      maxTotal: ASSESSMENT_MAX_TOTAL,
-      categories: ASSESSMENT_CATEGORIES.map((c) => ({ code: c.code, field: c.field, name: c.name, maxMarks: c.maxMarks })),
-      summary: { students: all.length, missing: count('missing'), partial: count('partial'), entered: count('entered'), finalized: count('finalized') },
+      maxTotal,
+      categories: categories.map((category) => ({
+        code: category.code,
+        field: category.field,
+        name: category.name,
+        maxMarks: category.maxMarks,
+      })),
+      summary: {
+        students: all.length,
+        missing: count('missing'),
+        partial: count('partial'),
+        entered: count('entered'),
+        finalized: count('finalized'),
+      },
       rows: filtered,
     };
   }
@@ -129,7 +194,12 @@ export class AssessmentsService {
   /** Change history of one student's assessment for a term (from the audit trail). */
   async history(auth: AuthContext, enrollmentId: string, term: Term) {
     await this.students.assertAccess(auth, enrollmentId);
-    const [record] = (await this.dataSource.query(`SELECT id FROM assessments WHERE enrollment_id = $1 AND term = $2`, [enrollmentId, term])) as Array<{ id: string }>;
+
+    const [record] = (await this.dataSource.query(
+      `SELECT id FROM assessments WHERE enrollment_id = $1 AND term = $2`,
+      [enrollmentId, term],
+    )) as Array<{ id: string }>;
+
     return record ? this.audit.history('assessment', record.id) : [];
   }
 }
